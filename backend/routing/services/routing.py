@@ -26,7 +26,9 @@ from .checkpoints import _haversine, polyline_length_miles
 
 logger = logging.getLogger(__name__)
 
-ORS_DIRECTIONS_URL = "https://api.openrouteservice.org/v2/directions/driving-hgv"
+# api.openrouteservice.org is deprecated (quota-restricted, then shut off) in
+# favour of HeiGIT's unified API host; same keys and request format.
+ORS_DIRECTIONS_URL = "https://api.heigit.org/openrouteservice/v2/directions/driving-hgv"
 # (connect, read) — fail fast on a dead connection, allow slow route computation
 ORS_TIMEOUT_SECONDS = (6, 20)
 ORS_ATTEMPTS = 2
