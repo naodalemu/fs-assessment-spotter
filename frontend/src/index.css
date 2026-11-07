@@ -1,0 +1,124 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+/* Leaflet popups and tooltips in the app's dark style */
+.leaflet-container {
+  font-family: inherit;
+  background: #0d1116;
+}
+
+.leaflet-popup-content-wrapper,
+.leaflet-popup-tip {
+  background: #1c2227;
+  color: #fafbfa;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+.leaflet-popup-content-wrapper {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+}
+
+.leaflet-popup-content {
+  margin: 12px 14px;
+}
+
+/* Leaflet gives <p> in popups a 17px margin; MUI Typography renders <p> */
+.leaflet-popup-content p {
+  margin: 0;
+}
+
+.leaflet-container a.leaflet-popup-close-button {
+  color: rgba(250, 251, 250, 0.7);
+}
+
+.leaflet-tooltip {
+  background: #1c2227;
+  color: #fafbfa;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  font-size: 12px;
+}
+
+.leaflet-tooltip-top::before {
+  border-top-color: #1c2227;
+}
+
+.leaflet-tooltip-right::before {
+  border-right-color: #1c2227;
+}
+
+.leaflet-control-attribution {
+  background: rgba(13, 17, 22, 0.75) !important;
+  color: rgba(250, 251, 250, 0.6);
+}
+
+.leaflet-control-attribution a {
+  color: #8effff;
+}
+
+/* Dark basemap: invert OSM tiles and rotate hues back so water stays blue and
+   parks green, then soften so routes and the heatmap stand out. */
+.basemap-dark {
+  filter: invert(1) hue-rotate(180deg) brightness(0.9) contrast(0.85) saturate(0.55);
+}
+
+/* Shown behind tiles while they load: match each basemap's land colour */
+.basemap-light-bg .leaflet-container {
+  background: #f2efe9;
+}
+
+/* Entrance animations */
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes grow-x {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+/* Popups grow from their marker instead of just appearing */
+.leaflet-popup {
+  animation: rise-in 220ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Heatmap hour frames crossfade (opacity only, GPU-composited) */
+.heat-frame {
+  transition: opacity 280ms linear;
+}
+
+/* Picking a place on the map */
+.picking .leaflet-container,
+.picking .leaflet-interactive {
+  cursor: crosshair !important;
+}

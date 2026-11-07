@@ -1,0 +1,10 @@
+Django>=5.0,<6.0
+djangorestframework>=3.14
+django-cors-headers>=4.3
+requests>=2.31
+python-dotenv>=1.0
+geopy>=2.4
+polyline>=2.0
+pytest>=7.4
+pytest-django>=4.7
+gunicorn>=22.0
