@@ -2,7 +2,7 @@ import axios from 'axios';
 
 // Same-origin '/api' in development (Vite proxy); set VITE_API_BASE_URL when
 // the frontend and backend are hosted separately.
-const api = axios.create({ baseURL: import.meta.env.VITE_API_BASE_URL || '' });
+const api = axios.create({ baseURL: (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '') });
 
 /**
  * Request routes with weather risk analysis.

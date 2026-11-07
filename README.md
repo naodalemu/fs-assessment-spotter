@@ -193,6 +193,16 @@ No test calls external services.
 
 ## Deployment
 
+The repo includes a Render Blueprint (`render.yaml`) that creates both
+services on Render's free tier: the API as a web service from `backend/` and
+the React app as a static site from `frontend/`. In the Render dashboard choose
+**New → Blueprint**, select this repo, and enter the prompted values
+(`ORS_API_KEY`, the frontend URL for `CORS_ALLOWED_ORIGINS`, and the API URL
+for `VITE_API_BASE_URL`). The free API sleeps after 15 idle minutes, so the
+first request after a pause takes about a minute.
+
+To deploy elsewhere:
+
 - **Backend**: any Python host (Render, Railway, Fly.io). Start command:
   `gunicorn config.wsgi --chdir backend --timeout 90 --workers 2 --threads 4`.
   The longer timeout matters: a cold search (several routing calls plus

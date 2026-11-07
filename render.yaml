@@ -1,0 +1,41 @@
+# Render Blueprint: creates both services from this one repo.
+# Render dashboard → New → Blueprint → pick this repo. See README "Deployment".
+services:
+  # Django API (free web service; sleeps after 15 idle minutes)
+  - type: web
+    name: weather-truck-routing-api
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    # Longer timeout: a cold search (several routing calls + forecasts) can
+    # exceed gunicorn's 30 s default
+    startCommand: gunicorn config.wsgi --bind 0.0.0.0:$PORT --timeout 90 --workers 2 --threads 4
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: DEBUG
+        value: "False"
+      - key: DJANGO_SECRET_KEY
+        generateValue: true
+      - key: ALLOWED_HOSTS
+        value: .onrender.com
+      - key: ORS_API_KEY
+        sync: false # entered in the dashboard; never committed
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false # the frontend URL, e.g. https://weather-truck-routing.onrender.com
+      - key: FORECAST_LOCATION_BUDGET
+        value: "300"
+
+  # React app (free static site; never sleeps)
+  - type: web
+    name: weather-truck-routing
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: VITE_API_BASE_URL
+        sync: false # the API URL, e.g. https://weather-truck-routing-api.onrender.com

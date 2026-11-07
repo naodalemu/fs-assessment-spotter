@@ -102,7 +102,7 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # CORS — Vite dev server by default; add the hosted frontend URL via env
 CORS_ALLOWED_ORIGINS = [
-    o.strip()
+    o.strip().rstrip("/")  # a pasted trailing slash would stop Django from starting
     for o in os.getenv(
         "CORS_ALLOWED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
     ).split(",")
