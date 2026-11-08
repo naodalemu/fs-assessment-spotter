@@ -59,4 +59,16 @@ describe('ForecastSlider playback', () => {
     runFor(20);
     expect(hour()).toBe(5);
   });
+
+  it('collapses to a pill and back, keeping the hour', () => {
+    renderSlider({ start: 7, arrivalHour: 20 });
+    fireEvent.click(screen.getByRole('button', { name: 'Hide forecast' }));
+    runFor(2); // let the fade finish
+    expect(screen.getByRole('button', { name: 'Show forecast' })).toHaveTextContent('Forecast +7 h');
+    expect(screen.getByRole('slider', { hidden: true })).not.toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Show forecast' }));
+    runFor(2);
+    expect(screen.getByRole('slider')).toBeVisible();
+    expect(hour()).toBe(7);
+  });
 });
