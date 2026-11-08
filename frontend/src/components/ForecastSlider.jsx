@@ -10,22 +10,33 @@ const PLAY_STEP_MS = 350;
 /**
  * 0–48 h forecast scrubber. Hour 0 is the departure time; the label shows
  * the absolute time so drivers can relate it to checkpoint ETAs.
+ *
+ * Play follows the selected truck and stops when it arrives (`arrivalHour`).
+ * Pressing play again from there continues through the rest of the 48 h
+ * forecast; dragging can always go anywhere.
  */
-function ForecastSlider({ hour, onChange, startTime }) {
-  const [playing, setPlaying] = useState(false);
+function ForecastSlider({ hour, onChange, startTime, arrivalHour = FORECAST_HOURS }) {
+  const [stopAt, setStopAt] = useState(null); // hour where playback ends; null = paused
+  const playing = stopAt !== null;
 
   useEffect(() => {
     if (!playing) return undefined;
     const id = setTimeout(() => {
-      if (hour >= FORECAST_HOURS) setPlaying(false);
+      if (hour >= stopAt) setStopAt(null);
       else onChange(hour + 1);
     }, PLAY_STEP_MS);
     return () => clearTimeout(id);
-  }, [playing, hour, onChange]);
+  }, [playing, stopAt, hour, onChange]);
 
   const togglePlay = () => {
-    if (!playing && hour >= FORECAST_HOURS) onChange(0);
-    setPlaying((p) => !p);
+    if (playing) {
+      setStopAt(null);
+      return;
+    }
+    const arrival = Math.min(arrivalHour, FORECAST_HOURS);
+    const from = hour >= FORECAST_HOURS ? 0 : hour;
+    if (from !== hour) onChange(from);
+    setStopAt(from < arrival ? arrival : FORECAST_HOURS);
   };
 
   const time = new Date(new Date(startTime).getTime() + hour * 3600 * 1000);
@@ -73,7 +84,7 @@ function ForecastSlider({ hour, onChange, startTime }) {
           step={1}
           marks={MARKS}
           onChange={(_, value) => {
-            setPlaying(false);
+            setStopAt(null);
             onChange(value);
           }}
           size="small"

@@ -113,6 +113,13 @@ describe('RouteForm', () => {
     expect(screen.getByRole('button', { name: 'Pick destination on map' })).toHaveAttribute('aria-pressed', 'false');
   });
 
+  it('clears a place with the X button', () => {
+    renderForm();
+    fill('Origin', 'Denver, CO');
+    fireEvent.click(screen.getAllByRole('button', { name: 'Clear' })[0]);
+    expect(screen.getByRole('combobox', { name: 'Origin' })).toHaveValue('');
+  });
+
   it('shows server errors and the loading state', () => {
     renderForm({ error: 'Could not find "Nowhere".', loading: true });
     expect(screen.getByRole('alert')).toHaveTextContent('Could not find "Nowhere".');

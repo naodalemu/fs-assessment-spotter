@@ -204,6 +204,59 @@ class TestGetRoutes:
         assert any("alternative_routes" in b for b in bodies if len(b["coordinates"]) == 2)
 
 
+class TestUnroutablePoints:
+    @staticmethod
+    def _no_road(coordinate_index):
+        response = requests.Response()
+        response.status_code = 404
+        response._content = (
+            b'{"error":{"code":2010,"message":"Could not find routable point within a radius of '
+            b'5000.0 meters of specified coordinate ' + str(coordinate_index).encode() + b': -135.8 63.6."}}'
+        )
+        failing = MagicMock()
+        failing.raise_for_status.side_effect = requests.HTTPError(response=response)
+        return failing
+
+    @patch.object(routing.requests, "post")
+    @patch.object(routing, "settings")
+    def test_names_the_origin_even_when_other_requests_fail_differently(self, mock_settings, mock_post):
+        mock_settings.ORS_API_KEY = "real_key"
+        other = requests.Response()
+        other.status_code = 400
+        other_failing = MagicMock()
+        other_failing.raise_for_status.side_effect = requests.HTTPError(response=other)
+        # direct request: origin has no road; one via request fails with a different error
+        mock_post.side_effect = lambda url, json, headers, timeout: (
+            other_failing if len(json["coordinates"]) == 3 and json["coordinates"][1][1] > 40 else self._no_road(0)
+        )
+        with pytest.raises(RoutingUnavailable, match="the origin is not near a drivable road"):
+            get_routes((63.6, -135.8), (25.76, -80.19))
+
+    @patch.object(routing.requests, "post")
+    @patch.object(routing, "settings")
+    def test_names_the_destination(self, mock_settings, mock_post):
+        mock_settings.ORS_API_KEY = "real_key"
+        mock_post.side_effect = lambda url, json, headers, timeout: self._no_road(len(json["coordinates"]) - 1)
+        with pytest.raises(RoutingUnavailable, match="the destination is not near a drivable road"):
+            get_routes(DALLAS, CHICAGO)
+
+    @patch.object(routing.requests, "post")
+    @patch.object(routing, "settings")
+    def test_unroutable_via_point_is_not_blamed_on_the_user(self, mock_settings, mock_post):
+        mock_settings.ORS_API_KEY = "real_key"
+        server_error = requests.Response()
+        server_error.status_code = 500
+        failing = MagicMock()
+        failing.raise_for_status.side_effect = requests.HTTPError(response=server_error)
+        # direct request hits a server error; via-point requests fail on the via-point (index 1)
+        mock_post.side_effect = lambda url, json, headers, timeout: (
+            self._no_road(1) if len(json["coordinates"]) == 3 else failing
+        )
+        with pytest.raises(RoutingUnavailable) as exc:
+            get_routes(DALLAS, CHICAGO)
+        assert "origin" not in str(exc.value) and "destination" not in str(exc.value)
+
+
 class TestMockRoutes:
     def test_three_distinct_routes_between_endpoints(self):
         routes = generate_mock_routes(DALLAS, CHICAGO)

@@ -31,7 +31,15 @@ import { formatDateTime, formatDuration, formatMiles, pointAlongLine } from '../
 // their true colours. No API key needed.
 const TILE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
 const ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
-const US_CENTER = [39.5, -98.35];
+// Contiguous United States, framed in the visible part of the map on load
+const US_BOUNDS = [
+  [24.5, -125],
+  [49.5, -66.9],
+];
+const usPadding = (insets) => ({
+  paddingTopLeft: [insets.left + 24, insets.top + 24],
+  paddingBottomRight: [24, 24],
+});
 const MARGIN = 48;
 const SLIDER_CLEARANCE = 150; // forecast panel at the bottom of the map
 const NO_INSETS = { top: 0, left: 0 };
@@ -49,6 +57,30 @@ const dotStyle = (risk, selected) =>
   selected
     ? { color: '#ffffff', weight: 2, fillColor: RISK_COLOR[risk], fillOpacity: 1 }
     : { color: '#0d1116', weight: 1, fillColor: RISK_COLOR[risk], fillOpacity: 0.8 };
+
+/**
+ * Before any search, keep the US framed in the visible area. The first effect
+ * fits it once the container has its final size; when the side panel opens or
+ * closes afterwards the map only slides to re-centre, keeping the zoom.
+ */
+function FrameUS({ insets }) {
+  const map = useMap();
+  const first = useRef(true);
+  useEffect(() => {
+    if (first.current) {
+      first.current = false;
+      map.invalidateSize({ pan: false });
+      map.fitBounds(US_BOUNDS, { ...usPadding(insets), animate: false });
+      return;
+    }
+    const zoom = map.getZoom();
+    const usCenter = L.latLngBounds(US_BOUNDS).getCenter();
+    // Shift so the US sits in the middle of the area the panel and header leave visible
+    const center = map.unproject(map.project(usCenter, zoom).subtract([insets.left / 2, insets.top / 2]), zoom);
+    map.panTo(center, { duration: 0.5 });
+  }, [insets, map]);
+  return null;
+}
 
 /**
  * Fly to frame all routes whenever a new result arrives, inside the part of
@@ -356,8 +388,8 @@ function MapView({
       sx={{ position: 'relative', height: '100%', width: '100%' }}
     >
       <MapContainer
-        center={US_CENTER}
-        zoom={4}
+        bounds={US_BOUNDS}
+        boundsOptions={usPadding(insets)}
         maxZoom={19}
         zoomControl={false}
         preferCanvas
@@ -372,7 +404,7 @@ function MapView({
         />
         <ZoomControl position="bottomright" />
         <SizeObserver />
-        {data && <FitToRoutes routes={data.routes} insets={insets} />}
+        {data ? <FitToRoutes routes={data.routes} insets={insets} /> : <FrameUS insets={insets} />}
         <FocusCheckpoint focus={focus} markers={markers} insets={insets} />
         <WeatherHeatmap heatmap={data?.heatmap} hour={hour} visible={heatmapVisible} />
         {data && (
@@ -415,15 +447,35 @@ function MapView({
 
       {data?.heatmap && (
         <Box sx={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: 0, zIndex: 1000, ...shift }}>
-          <ForecastSlider hour={hour} onChange={onHourChange} startTime={data.heatmap.start_time} />
+          <ForecastSlider
+            hour={hour}
+            onChange={onHourChange}
+            startTime={data.heatmap.start_time}
+            arrivalHour={selected ? Math.ceil(selected.travel_time_hours) : undefined}
+          />
         </Box>
       )}
 
       {!data && !loading && !picking && !pickedPlaces?.origin && !pickedPlaces?.destination && (
+        // Top of the map, like the picking hint, so it never covers the map itself
         <Box
-          sx={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', pointerEvents: 'none', zIndex: 900, ...shift }}
+          sx={{
+            position: 'absolute',
+            top: insets.top + 16,
+            left: 0,
+            right: 0,
+            display: 'flex',
+            justifyContent: 'center',
+            pointerEvents: 'none',
+            zIndex: 900,
+            ...shift,
+          }}
         >
-          <Typography sx={{ bgcolor: 'rgba(13, 17, 22, 0.85)', px: 2, py: 1, borderRadius: 2 }} color="text.secondary">
+          <Typography
+            variant="body2"
+            color="text.secondary"
+            sx={{ bgcolor: 'rgba(13, 17, 22, 0.88)', px: 2, py: 0.75, borderRadius: 5, boxShadow: 4 }}
+          >
             Enter a trip to compare routes and corridor weather.
           </Typography>
         </Box>

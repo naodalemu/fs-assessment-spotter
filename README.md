@@ -1,43 +1,114 @@
 # Weather-Aware Truck Routing
 
-A React + Django app that helps a truck driver pick the safest route. Given an
-origin, destination, departure time and load weight, it:
+A web app that helps a truck driver choose the safest route. Enter an origin,
+a destination, a departure time and the load weight; the app finds three truck
+routes, checks the weather forecast along each one at the time the truck will
+actually be there, rates the risk using wind, rain, snow and load-weight
+rules, and recommends the best route.
 
-1. builds **3 real heavy-goods-vehicle routes** (OpenRouteService `driving-hgv`),
-2. samples the **hourly forecast** every **10 / 25 / 50 miles** at the truck's
-   **ETA** at each checkpoint (Open-Meteo),
-3. classifies each checkpoint with the **wind / rain / snow thresholds and load rules**,
-4. **recommends** the route with the fewest Severe miles, then High miles, then
-   lowest average risk, then shortest time,
-5. shows routes, checkpoints, risk levels, ETAs and summaries on a **Leaflet map**
-   with a **0–48 h corridor weather heatmap** and forecast slider.
+**Live demo:** https://weather-truck-routing-24aj.onrender.com
+(hosted on a free plan: if it has been idle, the first search takes about a
+minute while the server wakes up)
 
-Routes and weather are always real, or, in explicit demo mode, fully
-simulated: real and invented data are never mixed. A warning appears above the
-results whenever data is simulated. If a live service fails, the user sees
-"temporarily unavailable, try again" instead of invented data, and the cause
-is logged for the operator.
-
-**No Travel** is a verdict, not a degree of risk: conditions at that point and
-time exceed safe limits and the truck should not drive through. If even the
-recommended route crosses No Travel conditions, its card says so and suggests
-delaying departure.
+Built with React (Vite, MUI, Leaflet) and Django REST Framework.
 
 ---
 
-## How each requirement is met
+## Features
 
-| Requirement | Implementation |
-| --- | --- |
-| Origin, destination, departure, load | `RouteForm.jsx`, with US place autocomplete (Nominatim), or pick either point by clicking the map (pin button in each field, Esc to cancel). Picked points are named by reverse geocoding, but the exact coordinates are what the backend receives. The backend accepts a place name or `lat,lng`. |
-| 3 route options from a routing API | `services/routing.py`. ORS only computes alternatives for trips under 100 km, so for longer trips the alternatives are real HGV routes forced through a via-point either side of the corridor. Requests run in parallel, out-and-back spurs at via-points are cut, and near-duplicates (>85 % shared path) or detours over 1.5× the fastest time are discarded. |
-| Sample weather every 10 / 25 / 50 mi at the ETA | `services/checkpoints.py` walks the route polyline. Mile markers are scaled to the road distance, so the last checkpoint is the destination. ETA = departure + mile × (drive time / distance). "Auto" picks 10 / 25 / 50 mi for trips up to 200 / 600 / longer. |
-| Weather risk rules | `services/risk.py`: worst of wind, rain and snow, then load modifiers. Each checkpoint also returns a human-readable `risk_reason`. |
-| Recommendation | `services/recommender.py`. Ranking key: No Travel miles → Severe miles → High miles → mile-weighted average risk → travel time. No Travel is treated as stricter than Severe, because the road is not drivable at all. The response explains which criterion decided it. |
-| Map with routes, checkpoints, risk, ETAs, summaries | `MapView.jsx`: every route drawn (hover for its summary), every checkpoint colored by risk, and popups with ETA, conditions and the reason. Popup rows have icons, each colored by that factor's own risk level. Light and dark basemaps both use full-detail OpenStreetMap tiles; dark mode recolors them with a CSS filter. The sidebar has route cards with a risk-mileage bar and a checkpoint table (click a row to fly to it). |
-| Corridor heatmap with a 0–48 h slider | `services/heatmap.py` + `WeatherHeatmap.jsx`: a grid along all routes with 49 hourly values per cell, sent once. Each hour is rendered once into a tiny image that the browser upscales smoothly, and scrubbing crossfades between two stacked images, which is opacity only. A truck marker glides along the selected route to where the truck is at that hour. |
+- **Trip input**: origin and destination by typing (with suggestions) or by
+  clicking the map, departure date and time, and load weight.
+- **Three truck routes** from a heavy-goods-vehicle routing engine.
+- **Weather checkpoints** every 10, 25 or 50 miles (or automatic), each using
+  the forecast for the hour the truck reaches it.
+- **Risk levels** per checkpoint (Low, Moderate, High, Severe, No Travel), with
+  the reason for each rating.
+- **Recommendation** of the safest route, with the deciding factor explained.
+- **Map** with all routes, color-coded checkpoints, ETAs and details on click.
+- **Corridor weather heatmap** with a 0–48 hour forecast slider. Playing it
+  moves a truck marker along the selected route.
+- Light and dark map, and a full-screen map mode.
+
+---
+
+## Getting started
+
+### Prerequisites
+
+- Python 3.11+
+- Node.js 20.19+ or 22.12+
+- A free [OpenRouteService](https://openrouteservice.org/dev/#/signup) API key
+  (optional: without one the app runs in demo mode with simulated routes)
+
+### Backend
+
+```bash
+cd backend
+python -m venv .venv
+.venv\Scripts\activate            # macOS/Linux: source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env              # Windows: copy .env.example .env
+# edit .env and set ORS_API_KEY
+python manage.py runserver 8000
+```
+
+### Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Open http://localhost:5173. The development server forwards `/api` requests
+to the backend on port 8000.
+
+### Configuration
+
+Backend settings are read from `backend/.env`:
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `ORS_API_KEY` | (none) | OpenRouteService key. If empty, routes are simulated (demo mode). |
+| `WEATHER_PROVIDER` | `open-meteo` | `open-meteo` for live forecasts, or `simulated` for generated storm fronts (useful for demonstrating risk levels when real weather is calm). |
+| `FORECAST_LOCATION_BUDGET` | `300` | Maximum forecast locations fetched per search (see [Free API limits](#free-api-limits)). `0` means no limit. |
+| `DJANGO_SECRET_KEY` | (dev key) | Django secret key. Set a random value in production. |
+| `DEBUG` | `False` | Django debug mode. |
+| `ALLOWED_HOSTS` | `*` | Comma-separated host names. |
+| `CORS_ALLOWED_ORIGINS` | `http://localhost:5173` | Comma-separated frontend URLs allowed to call the API. |
+
+Frontend: when the API is on a different domain, set `VITE_API_BASE_URL`
+(for example `https://my-api.example.com`) before building.
+
+---
+
+## How it works
+
+For each search the backend runs these steps:
+
+1. **Geocode** the origin and destination (Nominatim), unless coordinates were
+   given.
+2. **Route.** Request truck routes from OpenRouteService (`driving-hgv`
+   profile). OpenRouteService only computes alternative routes for trips under
+   100 km, so for longer trips the two alternatives are real truck routes
+   forced through a point on either side of the direct route. Detours that
+   double back are trimmed, near-duplicate routes are dropped, and up to three
+   distinct routes are kept.
+3. **Place checkpoints** along each route every 10, 25 or 50 miles, plus the
+   origin and destination. Automatic spacing uses 10 miles for trips up to
+   200 miles, 25 miles up to 600 miles, and 50 miles beyond. Each checkpoint's
+   ETA is the departure time plus its share of the route's drive time.
+4. **Fetch weather** from [Open-Meteo](https://open-meteo.com/) (hourly
+   forecasts, no API key) and read each checkpoint's conditions for the hour
+   it is reached: wind in mph, rain and snowfall in inches per hour.
+5. **Rate the risk** of each checkpoint (rules below).
+6. **Rank the routes** and mark the recommended one.
+7. **Build the heatmap**: forecast hazard for a grid of cells covering all
+   routes, for every hour from departure to 48 hours later.
 
 ### Risk rules
+
+Each checkpoint takes the worst level among wind, rain and snow:
 
 | Condition | Low | Moderate | High | Severe | No Travel |
 | --- | --- | --- | --- | --- | --- |
@@ -45,92 +116,79 @@ delaying departure.
 | Rain | < 0.10 in/hr | 0.10–0.25 | 0.25–0.50 | 0.50–1.00 | > 1.00 |
 | Snow | < 0.5 in/hr | 0.5–1.0 | 1.0–2.0 | 2.0–3.0 | > 3.0 |
 
-Load rules: wind ≥ 55 mph → No Travel for any load; 45–54 mph with > 30,000 lb →
-No Travel; 35–44 mph with > 40,000 lb → Severe. A shared boundary value
-(e.g. 0.25 in/hr) belongs to the higher level, except where the table says ">".
+A value on a shared boundary (for example 0.25 in/hr) belongs to the higher
+level, except where the table says ">".
 
-### Mileage attribution
+Load weight can then raise the level:
 
-Each checkpoint stands for the road closest to it: from the midpoint with the
-previous checkpoint to the midpoint with the next one. Summing those stretches
-gives Low / Moderate / High / Severe / No Travel miles that add up to the route
-distance.
+- wind ≥ 55 mph: No Travel for any load
+- wind 45–54 mph and load > 30,000 lb: No Travel
+- wind 35–44 mph and load > 40,000 lb: Severe
 
-### Weather data
+**No Travel** means conditions at that point and time are beyond safe limits:
+the truck should not drive through.
 
-[Open-Meteo](https://open-meteo.com/) hourly forecasts (no API key). Units are
-requested in mph and inches, so the values compare directly against the
-thresholds: `rain + showers` and `snowfall` are inches during the hour, and wind
-is sustained 10 m wind speed. For a checkpoint ETA, the forecast hour containing
-that time is used. Forecasts are fetched in batches of 100 locations for all
-unique ~0.1° cells, in parallel, and cached for 30 minutes.
+### Risk miles and recommendation
 
-The heatmap grid scales with trip length (0.1° to 2°). It covers each route
-plus one cell either side on fine grids, and maps each threshold onto 0.2 /
-0.4 / 0.6 / 0.8, so heatmap colors match the risk legend exactly.
+Each checkpoint represents the stretch of road halfway to its neighbors, so
+every mile of a route is counted under exactly one risk level. The average
+risk score weights each level by its miles (Low = 1 up to No Travel = 5).
 
-### Running on free tiers
+Routes are ranked by:
 
-This build runs on free API plans, so it is designed to stay inside their
-limits without changing what the user sees:
+1. fewest No Travel miles
+2. fewest Severe miles
+3. fewest High miles
+4. lowest average risk score
+5. shortest travel time
 
-| Service | Free limit | How the app stays within it |
-| --- | --- | --- |
-| Open-Meteo | 600 locations/minute, 10,000/day | Each search fetches at most `FORECAST_LOCATION_BUDGET` locations (default 300). Checkpoints get first claim, so each one normally has its own ~7 mi forecast; the heatmap uses the rest. Forecasts are cached for an hour in 6-hour blocks, shared across all users. |
-| OpenRouteService | daily request quota | Each search uses 3 to 5 requests, and results are cached for 24 hours, so repeated trips cost nothing. |
+No Travel is ranked before Severe because it means the road should not be
+driven at all. If even the best route crosses No Travel conditions, the app
+says so and suggests a later departure.
 
-If a limit is still hit, the API returns `503` with a neutral "temporarily
-unavailable" message, never invented data, and the specific cause (quota, rate
-limit, invalid key) is logged server-side.
+### Heatmap
 
-On a paid plan, set `FORECAST_LOCATION_BUDGET=0`. The same code then gives
-every checkpoint and heatmap cell full resolution. The only case the budget
-visibly coarsens today is 10-mile sampling on a cross-country trip, where
-neighbouring checkpoints share a forecast cell (each still at its own ETA).
+The heatmap grid is finer for short trips (about 7 miles per cell) and coarser
+for long ones (up to about 140 miles). Its colors use the same scale as the
+risk legend. All 49 hourly frames are sent with the search result, so moving
+the slider needs no further requests.
 
-### Smoothness
+### Free API limits
 
-The map always fills the window, and the header and side panel slide over it
-using only `transform` and `opacity`. The map therefore never resizes or
-redraws during the transition. Route layers and the side panel are memoized,
-so moving the forecast slider re-renders only the heatmap and truck marker.
-Measured in Chrome: entering or leaving full map, playback and rapid scrubbing
-all hold 60 fps.
+The app is configured for the free plans of its data providers:
 
-### Assumptions and limits
+- **Open-Meteo** allows 600 locations per minute and 10,000 per day. Each
+  search requests at most `FORECAST_LOCATION_BUDGET` locations (300 by
+  default). Checkpoints are served first, normally one forecast location per
+  checkpoint; the heatmap uses the rest. On very long trips with 10-mile
+  spacing, neighboring checkpoints can share a forecast location (each still
+  uses its own ETA). Forecasts are cached for one hour and shared between
+  searches.
+- **OpenRouteService** has a daily request quota. A search uses 3 to 5
+  requests, and routes are cached for 24 hours (route geometry and drive
+  times do not depend on the time of day).
 
-- ETAs assume the routing engine's average speed and no rest breaks.
-- Forecasts are limited to departures within the next 7 days.
-- Wind risk uses sustained wind, not gusts.
+If a provider is unavailable, the API responds with `503` and a message
+asking the user to try again; the cause is written to the server log. With a
+paid plan, set `FORECAST_LOCATION_BUDGET=0` for full forecast resolution
+everywhere.
+
+### Assumptions and limitations
+
+- ETAs use the routing engine's average speeds and do not include rest breaks
+  or traffic.
+- Departures must be within the next 7 days (forecast range).
+- Wind risk uses sustained wind speed, not gusts.
+- Place search suggests United States locations; points picked on the map can
+  be anywhere OpenRouteService has road data.
 
 ---
 
-## Architecture
+## API
 
-```
-frontend/ (React 19, Vite, MUI, react-leaflet)
-  App.jsx                 layout: full-screen map with a header, side panel and
-                          toolbar (heatmap, basemap, full map / F) layered on top
-  components/RouteForm    inputs + validation + autocomplete
-  components/RouteSummary route cards, risk bars, checkpoint table
-  components/MapView      routes, checkpoints, popups, truck marker
-  components/WeatherHeatmap  per-hour heat images with crossfade
-  components/ForecastSlider  0–48 h scrubber with play button + legend
+### `POST /api/routes/`
 
-backend/ (Django 5, DRF)
-  routing/views.py        POST /api/routes/
-  routing/services/
-    routing.py            ORS HGV routes, via-point alternatives, demo routes
-    checkpoints.py        distance sampling + ETAs
-    weather.py            Open-Meteo batching, cache, demo weather
-    risk.py               thresholds + load rules
-    recommender.py        risk mileage + ranking + explanation
-    heatmap.py            corridor grid, 49 hourly frames
-```
-
-### API
-
-`POST /api/routes/`
+Request:
 
 ```json
 {
@@ -142,73 +200,123 @@ backend/ (Django 5, DRF)
 }
 ```
 
-`interval_miles` is 10, 25 or 50; omit it or send `null` for Auto. The response
-contains `routes` (safest first, each with `checkpoints`, `risk_summary`,
-`is_recommended` and `recommendation_reason`), `heatmap`, `origin`,
-`destination` and `sources`. Errors are returned as `{"error": "...", "fields": {...}}`.
+- `origin` and `destination`: a place name or `"lat,lng"`.
+- `interval_miles`: `10`, `25` or `50`; omit or `null` for automatic.
+- `load_weight_lbs`: 0 to 100,000.
+
+Response (abridged):
+
+```json
+{
+  "routes": [
+    {
+      "name": "Route 1",
+      "is_recommended": true,
+      "recommendation_reason": "Fewer Severe miles than Route 2 (0 vs 30)",
+      "distance_miles": 946.3,
+      "travel_time_hours": 18.1,
+      "arrival_time": "2026-11-09T08:06:00+00:00",
+      "geometry": [[35.47, -97.52], "..."],
+      "risk_summary": {
+        "low_miles": 916.3, "moderate_miles": 30.0, "high_miles": 0.0,
+        "severe_miles": 0.0, "no_travel_miles": 0.0, "average_risk_score": 1.03
+      },
+      "checkpoints": [
+        {
+          "mile_marker": 50.0,
+          "eta": "2026-11-08T14:57:00+00:00",
+          "lat": 36.12, "lng": -97.34,
+          "weather": {
+            "description": "Light rain", "temperature_f": 54.0,
+            "wind_mph": 12.0, "rain_in_hr": 0.04, "snow_in_hr": 0.0
+          },
+          "risk_level": "Low",
+          "risk_reason": "All conditions below Moderate thresholds"
+        }
+      ]
+    }
+  ],
+  "heatmap": { "start_time": "...", "cell_size_deg": 0.5, "cells": [{ "lat": 36.0, "lng": -97.5, "values": ["...49 hourly values"] }] },
+  "sources": { "routing": "openrouteservice", "weather": "open-meteo" }
+}
+```
+
+Routes are returned safest first. Errors have the form
+`{"error": "message", "fields": {...}}`: status `400` for invalid input or an
+unknown place, and `503` when no route can be computed (for example, a point
+far from any road) or a data provider is unavailable. The message says which.
 
 ---
 
-## Running locally
+## Project structure
 
-Requirements: Python 3.11+, Node 18+.
-
-```bash
-# Backend
-cd backend
-python -m venv .venv
-.venv\Scripts\activate          # macOS/Linux: source .venv/bin/activate
-pip install -r requirements.txt
-copy .env.example .env          # then set ORS_API_KEY
-python manage.py runserver 8000
-
-# Frontend (second terminal)
-cd frontend
-npm install
-npm run dev                     # http://localhost:5173 (proxies /api to :8000)
+```
+backend/
+  config/                 Django settings and URLs
+  routing/
+    views.py              POST /api/routes/
+    serializers.py        request validation
+    services/
+      routing.py          OpenRouteService routes and alternatives
+      checkpoints.py      checkpoint placement and ETAs
+      weather.py          Open-Meteo forecasts and caching
+      risk.py             risk rules and load-weight rules
+      recommender.py      risk miles, ranking and explanation
+      heatmap.py          corridor grid and hourly frames
+    tests/
+frontend/
+  src/
+    App.jsx               page layout and app state
+    components/
+      RouteForm.jsx       trip form, place search, map picking
+      RouteSummary.jsx    route cards and checkpoint list
+      MapView.jsx         map, routes, checkpoints, popups, truck marker
+      WeatherHeatmap.jsx  heatmap layer
+      ForecastSlider.jsx  0–48 h slider and playback
+    api/routes.js         API and geocoding calls
+    __tests__/
+render.yaml               Render deployment (both services)
 ```
 
-### Environment variables (`backend/.env`)
-
-| Variable | Purpose |
-| --- | --- |
-| `ORS_API_KEY` | OpenRouteService key ([free signup](https://openrouteservice.org/dev/#/signup)). Without it the app runs in demo mode with simulated routes, labelled as such. Use a separate key for the hosted deployment so local testing can't use up its quota. |
-| `WEATHER_PROVIDER` | `open-meteo` (default, live) or `simulated`: deterministic moving storm fronts. Useful for demos when real weather is calm. |
-| `FORECAST_LOCATION_BUDGET` | Forecast locations per search (default `300`, fits Open-Meteo's free tier). `0` removes the limit for a paid plan. |
-| `DJANGO_SECRET_KEY`, `DEBUG`, `ALLOWED_HOSTS` | Standard Django settings. |
-| `CORS_ALLOWED_ORIGINS` | Comma-separated frontend origins (needed when hosted separately). |
-
-Frontend: set `VITE_API_BASE_URL` (e.g. `https://your-api.example.com`) when
-the API is on a different origin.
+---
 
 ## Tests
 
 ```bash
-cd backend && .venv\Scripts\python -m pytest     # 197 tests: risk boundaries, load rules, sampling,
-                                                 # ranking, ORS/Open-Meteo integration (mocked), API
-cd frontend && npx vitest run                    # 49 tests: form validation, map picking, route list, map, app flow
+cd backend
+python -m pytest           # 200 tests
+
+cd frontend
+npx vitest run             # 53 tests
 ```
 
-No test calls external services.
+Backend tests cover the risk thresholds and load rules (including boundary
+values), checkpoint placement and ETAs, ranking, routing and forecast handling
+with the providers mocked, and the API. Frontend tests cover the form, map
+picking, route list, map, forecast playback and the main app flow. No test
+calls an external service.
+
+---
 
 ## Deployment
 
-The repo includes a Render Blueprint (`render.yaml`) that creates both
-services on Render's free tier: the API as a web service from `backend/` and
-the React app as a static site from `frontend/`. In the Render dashboard choose
-**New → Blueprint**, select this repo, and enter the prompted values
-(`ORS_API_KEY`, the frontend URL for `CORS_ALLOWED_ORIGINS`, and the API URL
-for `VITE_API_BASE_URL`). The free API sleeps after 15 idle minutes, so the
-first request after a pause takes about a minute.
+`render.yaml` defines both services for [Render](https://render.com)'s free
+plan: the API as a web service from `backend/` and the React app as a static
+site from `frontend/`.
 
-To deploy elsewhere:
+1. In the Render dashboard choose **New → Blueprint** and select this
+   repository.
+2. Enter the requested values: `ORS_API_KEY`, `CORS_ALLOWED_ORIGINS` (the
+   static site's URL) and `VITE_API_BASE_URL` (the API's URL).
+3. After the first deploy, check that both URLs match those values (Render
+   adds a suffix when a name is taken) and update them if needed.
 
-- **Backend**: any Python host (Render, Railway, Fly.io). Start command:
-  `gunicorn config.wsgi --chdir backend --timeout 90 --workers 2 --threads 4`.
-  The longer timeout matters: a cold search (several routing calls plus
-  forecasts) can exceed gunicorn's 30-second default. Set `ORS_API_KEY` (a
-  key used only by this deployment), `DJANGO_SECRET_KEY`, `DEBUG=False`,
-  `ALLOWED_HOSTS` and `CORS_ALLOWED_ORIGINS` (the frontend URL). No database
-  or migrations are needed.
-- **Frontend**: `npm run build` in `frontend/` and serve `dist/` (Vercel,
-  Netlify). Set `VITE_API_BASE_URL` to the backend URL at build time.
+For other hosts, run the backend with:
+
+```bash
+gunicorn config.wsgi --timeout 90 --workers 2 --threads 4    # from backend/
+```
+
+The longer timeout allows for slow searches. The API uses no database, so no
+migrations are needed. Build the frontend with `npm run build` and serve
+`frontend/dist`.

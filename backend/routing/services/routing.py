@@ -243,6 +243,7 @@ def _fetch_ors_routes(api_key: str, origin, destination) -> list[Route]:
     use_alternatives = direct_miles <= ORS_ALTERNATIVES_LIMIT_MILES
 
     failures: list[int | None] = []  # HTTP status per failed request (None = network)
+    unroutable: set[str] = set()  # "origin" / "destination" with no road nearby
 
     def request(coords, alternatives=False):
         for attempt in range(1, ORS_ATTEMPTS + 1):
@@ -250,10 +251,13 @@ def _fetch_ors_routes(api_key: str, origin, destination) -> list[Route]:
                 return _ors_request(api_key, coords, alternatives)
             except (requests.ConnectionError, requests.Timeout) as exc:
                 logger.warning("ORS request attempt %d failed: %s", attempt, exc)
-            except requests.HTTPError as exc:  # e.g. no road near a via-point, quota exceeded
+            except requests.HTTPError as exc:  # e.g. no road near a point, quota exceeded
                 code = exc.response.status_code if exc.response is not None else None
                 logger.warning("ORS request failed: HTTP %s", code)
                 failures.append(code)
+                endpoint = _unroutable_endpoint(exc.response, len(coords))
+                if endpoint:
+                    unroutable.add(endpoint)
                 return None
             except Exception as exc:  # malformed payload
                 logger.warning("ORS request failed: %s", exc)
@@ -281,20 +285,45 @@ def _fetch_ors_routes(api_key: str, origin, destination) -> list[Route]:
             break
 
     if not candidates:
-        raise RoutingUnavailable(_failure_message(failures))
+        raise RoutingUnavailable(_failure_message(failures, unroutable))
     return _select_distinct(candidates)
 
 
 ROUTING_UNAVAILABLE_MESSAGE = "Routing is temporarily unavailable. Please try again in a minute."
 
 
-def _failure_message(statuses: list[int | None]) -> str:
+# ORS error code for "Could not find routable point within a radius of ... of
+# specified coordinate N"
+ORS_NO_ROUTABLE_POINT = 2010
+
+
+def _unroutable_endpoint(response, coordinate_count: int) -> str | None:
+    """'origin' or 'destination' if ORS says that point has no road nearby."""
+    try:
+        error = response.json()["error"]
+        if error.get("code") != ORS_NO_ROUTABLE_POINT:
+            return None
+        index = int(error["message"].split("specified coordinate")[1].split(":")[0])
+    except (ValueError, KeyError, IndexError, TypeError, AttributeError):
+        return None
+    if index == 0:
+        return "origin"
+    if index == coordinate_count - 1:
+        return "destination"
+    return None  # a via-point, which only steers alternatives
+
+
+def _failure_message(statuses: list[int | None], unroutable: set[str] = frozenset()) -> str:
     """
     User-facing message. Quota, key and provider problems are operational
     details: they are logged for the operator, and the user only sees that
-    routing is temporarily unavailable. A missing road is the user's input,
-    so that case says so.
+    routing is temporarily unavailable. A point far from any road is the
+    user's input, so that case says which one.
     """
+    if unroutable:
+        which = " and ".join(p for p in ("origin", "destination") if p in unroutable)
+        verb = "are" if len(unroutable) > 1 else "is"
+        return f"No truck route: the {which} {verb} not near a drivable road. Choose a point on or near a road."
     if statuses and all(s == 404 for s in statuses):
         return "No truck route found: the origin or destination is not near a drivable road."
     if 401 in statuses:

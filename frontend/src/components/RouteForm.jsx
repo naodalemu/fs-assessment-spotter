@@ -67,6 +67,9 @@ function PlaceField({ label, placeholder, icon, value, onChange, error, picking,
   return (
     <Autocomplete
       freeSolo
+      // MUI only shows the clear (X) button on hover/focus; keep it visible
+      // whenever the field has text so it's discoverable
+      sx={{ '& .MuiAutocomplete-clearIndicator': { visibility: 'visible' } }}
       options={options}
       filterOptions={(x) => x}
       getOptionLabel={(option) => (typeof option === 'string' ? option : option.label)}

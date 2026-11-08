@@ -7,6 +7,8 @@ import { sampleResponse } from './fixtures.js';
 // Leaflet needs a real browser; render react-leaflet components as plain DOM.
 const fakeMap = {
   flyToBounds: vi.fn(),
+  fitBounds: vi.fn(),
+  getZoom: vi.fn(() => 4),
   flyTo: vi.fn(),
   once: vi.fn(),
   getPane: vi.fn(() => ({ style: {} })),
